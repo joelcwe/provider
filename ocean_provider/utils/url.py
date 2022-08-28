@@ -13,7 +13,7 @@ from ocean_provider.utils.basics import get_config, get_provider_wallet
 logger = logging.getLogger(__name__)
 
 
-def get_redirect(url, redirect_count=0):
+def get_redirect(url, redirect_count=0, file_info_request=False):
     if not is_url(url):
         return None
 
@@ -21,9 +21,14 @@ def get_redirect(url, redirect_count=0):
         logger.info(f"More than 5 redirects for url {url}. Aborting.")
 
         return None
-
-    result = requests.head(url, allow_redirects=False)
-
+    print(file_info_request)
+    header = {"Range": "bytes=0-0"}
+    result = (
+        requests.get(url, allow_redirects=False, headers=header)
+        if file_info_request
+        else requests.head(url, allow_redirects=False)
+    )
+    print("123result")
     if result.status_code == 405:
         # HEAD not allowed, so defaulting to get
         result = requests.get(url, allow_redirects=False)
@@ -33,21 +38,19 @@ def get_redirect(url, redirect_count=0):
             url if url.endswith("/") else f"{url}/", result.headers["Location"]
         )
         logger.info(f"Redirecting for url {url} to location {location}.")
-
-        return get_redirect(location, redirect_count + 1)
+        return get_redirect(location, redirect_count + 1, file_info_request)
 
     return url
 
 
-def is_safe_url(url):
-    url = get_redirect(url)
-
+def is_safe_url(url, file_info_request=False):
+    url = get_redirect(url, file_info_request)
     if not url:
-        return False
+        return False, None
 
     result = urlparse(url)
 
-    return is_safe_domain(result.hostname)
+    return is_safe_domain(result.hostname), url
 
 
 def is_url(url):

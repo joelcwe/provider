@@ -13,13 +13,14 @@ from ocean_provider.utils.url import (
 )
 
 import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, ANY
 
 test_logger = logging.getLogger(__name__)
 
 
 @pytest.mark.unit
 def test_is_url():
+
     assert is_url("https://jsonplaceholder.typicode.com/") is True
     assert is_url("127.0.0.1") is False
     assert is_url("169.254.169.254") is False
@@ -28,15 +29,27 @@ def test_is_url():
 
 @pytest.mark.unit
 def test_is_safe_url():
-    assert is_safe_url("https://jsonplaceholder.typicode.com/") is True
-    assert is_safe_url("127.0.0.1") is False
-    assert is_safe_url("169.254.169.254") is False
-    assert is_safe_url("http://169.254.169.254/latest/meta-data/hostname") is False
+    assert is_safe_url("https://jsonplaceholder.typicode.com/") == (
+        True,
+        "https://jsonplaceholder.typicode.com/",
+    )
+    assert is_safe_url("127.0.0.1") == (False, None)
+    assert is_safe_url("169.254.169.254") == (False, None)
+    assert is_safe_url("http://169.254.169.254/latest/meta-data/hostname") == (
+        False,
+        None,
+    )
 
-    assert is_safe_url("https://bit.ly/3zqzc4m") is True  # jsonplaceholder example
-    assert is_safe_url("https://bit.ly/3znh0Zg") is False  # meta-data/hostname example
+    assert is_safe_url("https://bit.ly/3zqzc4m") == (
+        True,
+        "https://jsonplaceholder.typicode.com/",
+    )  # jsonplaceholder example
+    assert is_safe_url("https://bit.ly/3znh0Zg") == (
+        False,
+        None,
+    )  # meta-data/hostname example
 
-    assert is_safe_url("blabla") is False
+    assert is_safe_url("blabla") == (False, None)
 
 
 @pytest.mark.unit
@@ -92,3 +105,19 @@ def test_get_redirect():
         mock.return_value = redirect_response
         assert get_redirect("https://some-url.com:3000/index") is None
         assert mock.call_count == 6
+
+    redirect_response = Mock(spec=Response)
+    redirect_response.is_redirect = True
+    redirect_response.status_code = 200
+    redirect_response.headers = {"Location": "relative.html"}
+
+    normal_response = Mock(spec=Response)
+    normal_response.is_redirect = False
+    normal_response.status_code = 200
+
+    with patch("ocean_provider.utils.url.requests.get") as mock:
+        mock.side_effect = [redirect_response, normal_response]
+        assert (
+            get_redirect("https://some-url.com:3000/index", file_info_request=True)
+            == "https://some-url.com:3000/index/relative.html"
+        )

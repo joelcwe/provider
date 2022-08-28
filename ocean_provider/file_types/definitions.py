@@ -3,6 +3,7 @@ import json
 import logging
 import mimetypes
 import os
+from time import perf_counter
 from abc import abstractmethod
 from cgi import parse_header
 from typing import Protocol, Tuple
@@ -11,7 +12,7 @@ import requests
 from enforce_typing import enforce_types
 from flask import Response
 
-from ocean_provider.utils.url import is_safe_url
+from ocean_provider.utils.url import is_safe_url, get_redirect
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class FilesType(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def check_details(self, with_checksum=False):
+    def check_details(self, with_checksum=False, file_info_request=False):
         raise NotImplementedError
 
     @abstractmethod
@@ -43,29 +44,42 @@ class EndUrlType:
     def get_download_url(self):
         raise NotImplementedError
 
-    def check_details(self, with_checksum=False):
+    def check_details(self, with_checksum=False, file_info_request=False):
         """
         If the url argument is invalid, returns False and empty dictionary.
         Otherwise it returns True and a dictionary containing contentType and
         contentLength. If the with_checksum flag is set to True, it also returns
         the file checksum and the checksumType (currently hardcoded to sha256)
         """
+        success_codes = [200] if not file_info_request else [200, 206]
         url = self.get_download_url()
         try:
-            if not is_safe_url(url):
+            url_safe, url_redirect = is_safe_url(url, file_info_request)
+            if not url_safe:
                 return False, {}
+
+            # only follow redirect for fileinfo
+            if not file_info_request:
+                url_redirect = None
 
             for _ in range(int(os.getenv("REQUEST_RETRIES", 1))):
                 result, extra_data = self._get_result_from_url(
-                    with_checksum=with_checksum,
+                    with_checksum=with_checksum, url_redirect=url_redirect
                 )
                 if result and result.status_code == 200:
                     break
 
-            if result.status_code == 200:
+            if result.status_code in success_codes:
                 content_type = result.headers.get("Content-Type")
                 content_length = result.headers.get("Content-Length")
                 content_range = result.headers.get("Content-Range")
+                content_disposition = result.headers.get("Content-Disposition")
+
+                if content_range:
+                    try:
+                        content_length = content_range.split("/")[1]
+                    except IndexError:
+                        pass
 
                 if not content_length and content_range:
                     # sometimes servers send content-range instead
@@ -74,7 +88,14 @@ class EndUrlType:
                     except IndexError:
                         pass
 
-                if content_type:
+                if content_disposition:
+                    try:
+                        _, params = parse_header(content_disposition)
+                        content_type, _ = mimetypes.guess_type(params["filename"])
+                    except IndexError:
+                        pass
+
+                elif content_type:
                     try:
                         content_type = content_type.split(";")[0]
                     except IndexError:
@@ -90,28 +111,33 @@ class EndUrlType:
                         details.update(extra_data)
 
                     self.checked_details = details
+
                     return True, details
         except requests.exceptions.RequestException:
             pass
 
         return False, {}
 
-    def _get_result_from_url(self, with_checksum=False):
+    def _get_result_from_url(self, with_checksum=False, url_redirect=None):
         lightweight_methods = [] if self.method == "post" else ["head", "options"]
+        success_codes = [200] if url_redirect is None else [200, 206]
 
         for method in lightweight_methods:
             url = self.get_download_url()
+            if url_redirect is not None:
+                self.headers["Range"] = "bytes=0-0"
+                url = url_redirect
             func = getattr(requests, method)
+
             result = func(
                 url,
                 timeout=REQUEST_TIMEOUT,
                 headers=self.headers,
                 params=self.format_userdata(),
             )
-
             if (
                 not with_checksum
-                and result.status_code == 200
+                and result.status_code in success_codes
                 and (
                     result.headers.get("Content-Type")
                     or result.headers.get("Content-Range")
@@ -119,12 +145,12 @@ class EndUrlType:
                 and result.headers.get("Content-Length")
             ):
                 return result, {}
-
         func, func_args = self._get_func_and_args()
 
         if not with_checksum:
             # fallback on full request, since head and options did not work
-            return func(**func_args), {}
+            function = func(**func_args), {}
+            return function
 
         sha = hashlib.sha256()
 
@@ -132,7 +158,6 @@ class EndUrlType:
             r.raise_for_status()
             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                 sha.update(chunk)
-
         return r, {"checksum": sha.hexdigest(), "checksumType": "sha256"}
 
     def _get_func_and_args(self):

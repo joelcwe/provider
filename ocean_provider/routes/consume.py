@@ -107,7 +107,9 @@ def fileinfo():
             return error_response(message, 400, logger)
 
         file_instance = message
-        valid, details = file_instance.check_details(with_checksum=with_checksum)
+        valid, details = file_instance.check_details(
+            with_checksum=with_checksum, file_info_request=True
+        )
         info = {"index": i, "valid": valid}
         info.update(details)
         files_info.append(info)
