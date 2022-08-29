@@ -4,7 +4,7 @@
 #
 import ipaddress
 import logging
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin, urlparse
 
 import dns.resolver
 import requests
@@ -21,14 +21,14 @@ def get_redirect(url, redirect_count=0, file_info_request=False):
         logger.info(f"More than 5 redirects for url {url}. Aborting.")
 
         return None
-    print(file_info_request)
+
     header = {"Range": "bytes=0-0"}
     result = (
         requests.get(url, allow_redirects=False, headers=header)
         if file_info_request
         else requests.head(url, allow_redirects=False)
     )
-    print("123result")
+
     if result.status_code == 405:
         # HEAD not allowed, so defaulting to get
         result = requests.get(url, allow_redirects=False)

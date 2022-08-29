@@ -3,7 +3,6 @@ import json
 import logging
 import mimetypes
 import os
-from time import perf_counter
 from abc import abstractmethod
 from cgi import parse_header
 from typing import Protocol, Tuple
@@ -11,8 +10,7 @@ from typing import Protocol, Tuple
 import requests
 from enforce_typing import enforce_types
 from flask import Response
-
-from ocean_provider.utils.url import is_safe_url, get_redirect
+from ocean_provider.utils.url import is_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -76,24 +74,19 @@ class EndUrlType:
                 content_disposition = result.headers.get("Content-Disposition")
 
                 if content_range:
-                    try:
-                        content_length = content_range.split("/")[1]
-                    except IndexError:
-                        pass
-
-                if not content_length and content_range:
                     # sometimes servers send content-range instead
                     try:
-                        content_length = content_range.split("-")[1]
+                        content_length = (
+                            content_range.split("/")[1]
+                            if content_length
+                            else content_range.split("-")[1]
+                        )
                     except IndexError:
                         pass
 
                 if content_disposition:
-                    try:
-                        _, params = parse_header(content_disposition)
-                        content_type, _ = mimetypes.guess_type(params["filename"])
-                    except IndexError:
-                        pass
+                    _, params = parse_header(content_disposition)
+                    content_type, _ = mimetypes.guess_type(params["filename"])
 
                 elif content_type:
                     try:
@@ -123,10 +116,13 @@ class EndUrlType:
         success_codes = [200] if url_redirect is None else [200, 206]
 
         for method in lightweight_methods:
-            url = self.get_download_url()
-            if url_redirect is not None:
+
+            if url_redirect is None:
+                url = self.get_download_url()
+            else:
                 self.headers["Range"] = "bytes=0-0"
                 url = url_redirect
+
             func = getattr(requests, method)
 
             result = func(
@@ -149,8 +145,7 @@ class EndUrlType:
 
         if not with_checksum:
             # fallback on full request, since head and options did not work
-            function = func(**func_args), {}
-            return function
+            return func(**func_args), {}
 
         sha = hashlib.sha256()
 
@@ -206,7 +201,8 @@ class EndUrlType:
         )
 
         try:
-            if validate_url and not is_safe_url(url):
+            is_url_safe, _ = is_safe_url(url)
+            if validate_url and not is_url_safe:
                 raise ValueError(f"Unsafe url {url}")
 
             download_response_headers = {}
