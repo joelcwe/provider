@@ -43,7 +43,7 @@ def get_redirect(url, redirect_count=0, file_info_request=False):
 
 
 def is_safe_url(url, file_info_request=False):
-    url = get_redirect(url, file_info_request)
+    url = get_redirect(url, file_info_request=file_info_request)
     if not url:
         return False, None
 
