@@ -86,7 +86,10 @@ class EndUrlType:
 
                 if content_disposition:
                     _, params = parse_header(content_disposition)
-                    content_type, _ = mimetypes.guess_type(params["filename"])
+                    filename = next(
+                        (v for k, v in params.items() if k.startswith("filename")), ""
+                    )
+                    content_type, _ = mimetypes.guess_type(filename)
 
                 elif content_type:
                     try:
