@@ -22,9 +22,8 @@ def get_redirect(url, redirect_count=0, file_info_request=False):
 
         return None
 
-    header = {"Range": "bytes=0-0"}
     result = (
-        requests.get(url, allow_redirects=False, headers=header)
+        requests.get(url, allow_redirects=False)
         if file_info_request
         else requests.head(url, allow_redirects=False)
     )
